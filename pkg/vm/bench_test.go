@@ -1,0 +1,217 @@
+package vm
+
+import (
+	"encoding/base64"
+	"strconv"
+	"testing"
+
+	"github.com/nspcc-dev/neo-go/pkg/vm/opcode"
+	"github.com/nspcc-dev/neo-go/pkg/vm/stackitem"
+	"github.com/stretchr/testify/require"
+)
+
+func benchScript(t *testing.B, script []byte) {
+	for t.Loop() {
+		t.StopTimer()
+		vm := load(script)
+		t.StartTimer()
+		err := vm.Run()
+		t.StopTimer()
+		require.NoError(t, err)
+		t.StartTimer()
+	}
+}
+
+// Shared as is by @ixje once upon a time (compiled from Python).
+func BenchmarkScriptFibonacci(t *testing.B) {
+	var script = []byte{87, 5, 0, 16, 112, 17, 113, 105, 104, 18, 192, 114, 16, 115, 34, 28, 104, 105, 158, 116, 106, 108, 75,
+		217, 48, 38, 5, 139, 34, 5, 207, 34, 3, 114, 105, 112, 108, 113, 107, 17, 158, 115, 107, 12, 2, 94, 1,
+		219, 33, 181, 36, 222, 106, 64}
+	benchScript(t, script)
+}
+
+func BenchmarkScriptNestedRefCount(t *testing.B) {
+	b64script := "whBNEcARTRHAVgEB/gGdYBFNEU0SwFMSwFhKJPNFUUVFRQ=="
+	script, err := base64.StdEncoding.DecodeString(b64script)
+	require.NoError(t, err)
+	benchScript(t, script)
+}
+
+func BenchmarkSlotStore(t *testing.B) {
+	t.Run("int", func(t *testing.B) {
+		var script = []byte{
+			byte(opcode.INITSSLOT), 1,
+			byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+			byte(opcode.PUSH1),
+			byte(opcode.STSFLD0),
+			byte(opcode.DEC),
+			byte(opcode.JMPIFNOT), 0xfd,
+		}
+		benchScript(t, script)
+	})
+	t.Run("new-array-1024", func(t *testing.B) {
+		var script = []byte{
+			byte(opcode.INITSSLOT), 1,
+			byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+			byte(opcode.PUSHINT16), 0, 4,
+			byte(opcode.NEWARRAY),
+			byte(opcode.STSFLD0),
+			byte(opcode.DEC),
+			byte(opcode.JMPIFNOT), 0xfa,
+		}
+		benchScript(t, script)
+	})
+	t.Run("same-array-1024", func(t *testing.B) {
+		var script = []byte{
+			byte(opcode.INITSSLOT), 1,
+			byte(opcode.PUSHINT16), 0, 4,
+			byte(opcode.NEWARRAY),
+			byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+			byte(opcode.SWAP),
+			byte(opcode.DUP),
+			byte(opcode.STSFLD0),
+			byte(opcode.SWAP),
+			byte(opcode.DEC),
+			byte(opcode.JMPIFNOT), 0xfb,
+		}
+		benchScript(t, script)
+	})
+}
+
+func BenchmarkInitArgsSlot(t *testing.B) {
+	t.Run("16-int", func(t *testing.B) {
+		var script = []byte{
+			byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+			byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1),
+			byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1), byte(opcode.PUSH1),
+			byte(opcode.CALL), 4,
+			byte(opcode.JMP), 6,
+			byte(opcode.INITSLOT), 0, 16,
+			byte(opcode.RET),
+			byte(opcode.DEC),
+			byte(opcode.JMPIFNOT), 0xe7,
+		}
+		benchScript(t, script)
+	})
+	t.Run("array-1024", func(t *testing.B) {
+		var script = []byte{
+			byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+			byte(opcode.PUSHINT16), 0, 4,
+			byte(opcode.NEWARRAY),
+			byte(opcode.CALL), 4,
+			byte(opcode.JMP), 6,
+			byte(opcode.INITSLOT), 0, 1,
+			byte(opcode.RET),
+			byte(opcode.DEC),
+			byte(opcode.JMPIFNOT), 0xf3,
+		}
+		benchScript(t, script)
+	})
+}
+
+func BenchmarkNewArray(t *testing.B) {
+	var script = []byte{
+		byte(opcode.PUSHINT16), 0, 2, // Loop counter, 512.
+		byte(opcode.PUSHINT16), 0, 4,
+		byte(opcode.NEWARRAY),
+		byte(opcode.DROP),
+		byte(opcode.DEC),
+		byte(opcode.JMPIFNOT), 0xfa,
+	}
+	benchScript(t, script)
+}
+
+func BenchmarkScriptPushPop(t *testing.B) {
+	for _, i := range []int{4, 16, 128, 1024} {
+		t.Run(strconv.Itoa(i), func(t *testing.B) {
+			var script = make([]byte, i*2)
+			for p := range i {
+				script[p] = byte(opcode.PUSH1)
+				script[i+p] = byte(opcode.DROP)
+			}
+			benchScript(t, script)
+		})
+	}
+}
+
+func BenchmarkScriptPackMap(t *testing.B) {
+	var script = []byte{
+		byte(opcode.INITSSLOT), 2,
+		byte(opcode.PUSHINT16), 0, 2,
+		byte(opcode.STSFLD1),
+		byte(opcode.PUSHINT16), 0, 3,
+		byte(opcode.STSFLD0),
+		byte(opcode.PUSHNULL),
+		byte(opcode.PUSH0),
+		byte(opcode.PUSH1),
+		byte(opcode.PACKMAP),
+		byte(opcode.LDSFLD0),
+		byte(opcode.DEC),
+		byte(opcode.STSFLD0),
+		byte(opcode.LDSFLD0),
+		byte(opcode.JMPIF), 0xf9,
+		byte(opcode.DROP),
+		byte(opcode.LDSFLD1),
+		byte(opcode.DEC),
+		byte(opcode.STSFLD1),
+		byte(opcode.LDSFLD1),
+		byte(opcode.JMPIF), 0xed,
+	}
+	benchScript(t, script)
+}
+
+func BenchmarkScriptUnpackMap(t *testing.B) {
+	var script = []byte{
+		byte(opcode.INITSSLOT), 1,
+		byte(opcode.PUSHINT16), 0, 2,
+		byte(opcode.STSFLD0),
+		byte(opcode.PUSHINT16), 0, 7,
+		byte(opcode.NEWARRAY),
+		byte(opcode.PUSH0),
+		byte(opcode.PUSH1),
+		byte(opcode.PACKMAP),
+		byte(opcode.UNPACK),
+		byte(opcode.LDSFLD0),
+		byte(opcode.DEC),
+		byte(opcode.STSFLD0),
+		byte(opcode.LDSFLD0),
+		byte(opcode.JMPIF), 0xfa,
+	}
+	benchScript(t, script)
+}
+
+func BenchmarkScriptValuesArray(t *testing.B) {
+	var script = []byte{
+		byte(opcode.INITSSLOT), 1,
+		byte(opcode.PUSHINT16), 0, 2,
+		byte(opcode.STSFLD0),
+		byte(opcode.PUSHINT16), 0, 7,
+		byte(opcode.NEWARRAY),
+		byte(opcode.PUSH1),
+		byte(opcode.PACK),
+		byte(opcode.VALUES),
+		byte(opcode.LDSFLD0),
+		byte(opcode.DEC),
+		byte(opcode.STSFLD0),
+		byte(opcode.LDSFLD0),
+		byte(opcode.JMPIF), 0xfb,
+	}
+	benchScript(t, script)
+}
+
+func BenchmarkScriptNewArrayT(t *testing.B) {
+	var script = []byte{
+		byte(opcode.INITSSLOT), 1,
+		byte(opcode.PUSHINT16), 0, 2,
+		byte(opcode.STSFLD0),
+		byte(opcode.PUSHINT16), 0, 7,
+		byte(opcode.NEWARRAYT), byte(stackitem.ByteArrayT),
+		byte(opcode.DROP),
+		byte(opcode.LDSFLD0),
+		byte(opcode.DEC),
+		byte(opcode.STSFLD0),
+		byte(opcode.LDSFLD0),
+		byte(opcode.JMPIF), 0xf6,
+	}
+	benchScript(t, script)
+}

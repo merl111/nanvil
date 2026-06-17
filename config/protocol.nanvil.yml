@@ -1,0 +1,43 @@
+ProtocolConfiguration:
+  Magic: 1313161558  # 0x4e414e56 NANV
+  MaxTraceableBlocks: 100000
+  MaxBlockSystemFee: 900000000000
+  TimePerBlock: 1s
+  Genesis:
+    TimePerBlock: 1s
+  StandbyCommittee:
+    - 02b3622bf4017bdfe317c58aed5f4c753f206b7db896046fa7d774bbc4bf7f8dc2
+  ValidatorsCount: 1
+  VerifyTransactions: true
+  P2PSigExtensions: true
+  Hardforks:
+    Aspidochelone: 1
+    Basilisk: 2
+    Cockatrice: 3
+    Domovoi: 4
+    Echidna: 5
+
+ApplicationConfiguration:
+  KeepOnlyLatestState: false
+  SaveInvocations: true
+  DBConfiguration:
+    Type: "inmemory"
+  P2P:
+    Addresses:
+      - ":0"
+    MinPeers: 0
+    MaxPeers: 0
+  Relay: true
+  RPC:
+    Enabled: true
+    Addresses:
+      - "127.0.0.1:8545"
+    SessionEnabled: true
+    SessionLifetime: 30s
+  Nanvil:
+    Enabled: true
+    ImpersonationEnabled: true
+    AutoMine: true
+    Accounts: 10
+    Balance: 1000000000000
+    Mnemonic: "test test test test test test test test test test test junk"

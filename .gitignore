@@ -1,0 +1,67 @@
+# Binaries and build output
+bin/
+/nanvil
+/ncast
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+
+# Test binaries
+*.test
+
+# Go workspace
+vendor/
+
+# Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*~
+TAGS
+.DS_Store
+
+# Local chain and persisted state
+/chains/
+nanvil-data/
+*.state.json
+*.fork.json
+
+# Fork remote storage cache (default: system temp)
+nanvil-cache/
+
+# Coverage
+coverage.txt
+coverage.html
+
+# Patches
+*.orig
+*.rej
+
+# Compiled contract artifacts (keep checked-in test fixtures)
+*.nef
+!pkg/**/testdata/**/*.nef
+
+# Upstream VM test vectors (optional; not required for nanvil)
+pkg/vm/testdata/neo-vm/
+
+# Fuzzing corpora
+testdata/
+!internal/basicchain/testdata/
+!pkg/compiler/testdata/
+!pkg/config/testdata/
+!pkg/consensus/testdata/
+!pkg/services/rpcsrv/testdata/
+!pkg/services/notary/testdata/
+!pkg/services/oracle/testdata/
+!pkg/smartcontract/testdata/
+pkg/vm/testdata/fuzz/
+!pkg/vm/testdata/
+!pkg/wallet/testdata/
+
+# Linter config (fetched locally)
+.golangci.yml

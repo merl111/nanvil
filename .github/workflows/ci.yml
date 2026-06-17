@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: make build
+      - name: Unit tests
+        run: go test ./pkg/nanvil/... ./pkg/ncast/... -race -count=1 -timeout 120s
+      - name: Integration tests
+        run: go test ./integration/... -count=1 -timeout 120s
+      - name: Vet
+        run: make vet

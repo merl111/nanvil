@@ -1,0 +1,514 @@
+package vm
+
+import (
+	"testing"
+
+	"github.com/nspcc-dev/neo-go/pkg/vm/opcode"
+	"github.com/nspcc-dev/neo-go/pkg/vm/stackitem"
+	"github.com/nspcc-dev/neo-go/pkg/vm/vmstate"
+	"github.com/stretchr/testify/require"
+)
+
+func TestRefCounter_Add(t *testing.T) {
+	r := newRefCounter()
+
+	require.Equal(t, 0, int(*r))
+
+	r.Add(stackitem.Null{})
+	require.Equal(t, 1, int(*r))
+
+	r.Add(stackitem.Null{})
+	require.Equal(t, 2, int(*r)) // count scalar items twice
+
+	arr := stackitem.NewArray([]stackitem.Item{stackitem.NewByteArray([]byte{1}), stackitem.NewBool(false)})
+	r.Add(arr)
+	require.Equal(t, 5, int(*r)) // array + 2 elements
+
+	r.Add(arr)
+	require.Equal(t, 6, int(*r)) // count only array
+
+	r.Remove(arr)
+	require.Equal(t, 5, int(*r))
+
+	r.Remove(arr)
+	require.Equal(t, 2, int(*r))
+
+	m := stackitem.NewMap()
+	m.Add(stackitem.NewByteArray([]byte("some")), stackitem.NewBool(false))
+	r.Add(m)
+	require.Equal(t, 5, int(*r)) // map + key + value
+
+	r.Add(m)
+	require.Equal(t, 6, int(*r)) // map only
+
+	r.Remove(m)
+	require.Equal(t, 5, int(*r))
+
+	r.Remove(m)
+	require.Equal(t, 2, int(*r))
+}
+
+func TestRefCounterDupPopItem(t *testing.T) {
+	prog := makeProgram(opcode.DUP, opcode.POPITEM)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42), stackitem.Make(42)}))
+	require.Equal(t, 3, int(v.refs)) // One array reference, two elements inside.
+	runVM(t, v)
+	// After DUP: Two array references, two elements inside.
+	// After POPITEM: One array reference, one element inside, one element outside (on the stack).
+	require.Equal(t, 2, v.estack.Len())
+	require.Equal(t, 3, int(v.refs))
+	_ = v.estack.Pop()
+	require.Equal(t, 1, v.estack.Len())
+	require.Equal(t, 2, int(v.refs))
+	_ = v.estack.Pop()
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterPopItem(t *testing.T) {
+	prog := makeProgram(opcode.POPITEM)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}))
+	require.Equal(t, 2, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 1, v.estack.Len())
+	require.Equal(t, 1, int(v.refs))
+	_ = v.estack.Pop()
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterAppend(t *testing.T) {
+	prog := makeProgram(opcode.APPEND)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{}))
+	v.estack.PushVal(stackitem.Make(42))
+	require.Equal(t, 2, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterDupAppend(t *testing.T) {
+	prog := makeProgram(opcode.DUP, opcode.PUSH0, opcode.APPEND)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{}))
+	require.Equal(t, 1, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 1, v.estack.Len())
+	require.Equal(t, 2, int(v.refs))
+	_ = v.estack.Pop()
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterSetItemMap(t *testing.T) {
+	prog := makeProgram(opcode.SETITEM)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewMap())
+	v.estack.PushVal(stackitem.Make(0))
+	v.estack.PushVal(stackitem.Make(100500))
+	require.Equal(t, 3, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterDupSetItemMap(t *testing.T) {
+	prog := makeProgram(opcode.DUP, opcode.PUSH0, opcode.PUSH1, opcode.SETITEM)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewMap())
+	require.Equal(t, 1, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 1, v.estack.Len())
+	require.Equal(t, 3, int(v.refs))
+	_ = v.estack.Pop()
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterSetItemArray(t *testing.T) {
+	prog := makeProgram(opcode.SETITEM)
+	v := load(prog)
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}))
+	v.estack.PushVal(stackitem.Make(0))
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}))
+	require.Equal(t, 5, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, 0, v.estack.Len())
+	require.Equal(t, 0, int(v.refs))
+}
+
+func TestRefCounterRemove(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array":  func() stackitem.Item { return stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}) },
+		"struct": func() stackitem.Item { return stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)}) },
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make(42)}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.REMOVE)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			v.estack.PushVal(stackitem.Make(0))
+			require.Equal(t, 3+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterDupRemove(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array":  func() stackitem.Item { return stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}) },
+		"struct": func() stackitem.Item { return stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)}) },
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make(42)}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.DUP, opcode.PUSH0, opcode.REMOVE)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 2+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 1, v.estack.Len())
+			require.Equal(t, 1, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterClearItems(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array":  func() stackitem.Item { return stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}) },
+		"struct": func() stackitem.Item { return stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)}) },
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make(42)}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.CLEARITEMS)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 2+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterDupClearItems(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array":  func() stackitem.Item { return stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}) },
+		"struct": func() stackitem.Item { return stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)}) },
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make(42)}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.DUP, opcode.CLEARITEMS)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 2+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 1, v.estack.Len())
+			require.Equal(t, 1, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterUnpack(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array": func() stackitem.Item {
+			return stackitem.NewArray([]stackitem.Item{stackitem.Make([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"struct": func() stackitem.Item {
+			return stackitem.NewStruct([]stackitem.Item{stackitem.Make([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make([]stackitem.Item{stackitem.Make(42)})}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.UNPACK)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 3+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 2+keyCount, v.estack.Len())
+			// Unpacked value on stack (2) + key on stack (keyCount) + array/struct/map length (1).
+			require.Equal(t, (2+keyCount)+1, int(v.refs))
+			// Pop array/struct/map length.
+			v.estack.Pop()
+			require.Equal(t, 2+keyCount, int(v.refs))
+			// Pop array and key.
+			v.estack.Pop()
+			if typ == "map" {
+				require.Equal(t, 2, int(v.refs))
+				v.estack.Pop()
+			}
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterDupUnpack(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array": func() stackitem.Item {
+			return stackitem.NewArray([]stackitem.Item{stackitem.Make([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"struct": func() stackitem.Item {
+			return stackitem.NewStruct([]stackitem.Item{stackitem.Make([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Make([]stackitem.Item{stackitem.Make(42)})}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.DUP, opcode.UNPACK)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, (2+keyCount)+1, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, (2+keyCount)+1, v.estack.Len())
+			// Compound type (3) + ref on unpacked value on stack (1)
+			// + keys in map and on stack (2*keyCount) + array/struct/map length (1).
+			require.Equal(t, 3+1+2*keyCount+1, int(v.refs))
+			// Pop array/struct/map length.
+			v.estack.Pop()
+			require.Equal(t, 3+1+2*keyCount, int(v.refs))
+			// Pop array and key.
+			v.estack.Pop()
+			if typ == "map" {
+				require.Equal(t, 3+1+keyCount, int(v.refs))
+				v.estack.Pop()
+			}
+			require.Equal(t, 1, v.estack.Len())
+			// After pop array we shouldn't remove all array's items.
+			// Compound type (3) + key in map (keyCount).
+			require.Equal(t, 3+keyCount, int(v.refs))
+			// Pop compound type.
+			v.estack.Pop()
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterValues(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array": func() stackitem.Item {
+			return stackitem.NewArray([]stackitem.Item{stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"struct": func() stackitem.Item {
+			return stackitem.NewStruct([]stackitem.Item{stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.VALUES)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 3+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 1, v.estack.Len())
+			// Array with struct from array/struct/map inside (3).
+			require.Equal(t, 3, int(v.refs))
+			v.estack.Pop()
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterDupValues(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array": func() stackitem.Item {
+			return stackitem.NewArray([]stackitem.Item{stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"struct": func() stackitem.Item {
+			return stackitem.NewStruct([]stackitem.Item{stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})})
+		},
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)})}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.DUP, opcode.VALUES)
+			v := load(prog)
+			v.estack.PushVal(newTyp())
+			require.Equal(t, 3+keyCount, int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 2, v.estack.Len())
+			// Compound type (3+keyCount) + array with cloned struct (3).
+			require.Equal(t, (3+keyCount)+3, int(v.refs))
+			// Pop array with cloned struct.
+			v.estack.Pop()
+			require.Equal(t, 3+keyCount, int(v.refs))
+			// Pop compound type.
+			v.estack.Pop()
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterSetItemCloneStruct(t *testing.T) {
+	for typ, newTyp := range map[string]func() stackitem.Item{
+		"array": func() stackitem.Item {
+			return stackitem.NewArray(make([]stackitem.Item, 1))
+		},
+		"struct": func() stackitem.Item {
+			return stackitem.NewStruct(make([]stackitem.Item, 1))
+		},
+		"map": func() stackitem.Item {
+			return stackitem.NewMapWithValue([]stackitem.MapElement{{Key: stackitem.Make(0), Value: stackitem.Null{}}})
+		},
+	} {
+		t.Run(typ, func(t *testing.T) {
+			var keyCount int
+			if typ == "map" {
+				keyCount++
+			}
+			prog := makeProgram(opcode.DUP, opcode.PUSH0, opcode.PUSH3, opcode.PICK, opcode.SETITEM)
+			v := load(prog)
+			v.estack.PushVal(stackitem.NewStruct([]stackitem.Item{stackitem.Make(42)}))
+			require.Equal(t, 2, int(v.refs))
+			v.estack.PushVal(newTyp())
+			// Struct with number (2) + array/struct/map with null inside (2+keyCount).
+			require.Equal(t, 2+(2+keyCount), int(v.refs))
+			runVM(t, v)
+			require.Equal(t, 2, v.estack.Len())
+			// Struct with number (2) + array/struct/map with cloned struct (3+keyCount).
+			require.Equal(t, 2+(3+keyCount), int(v.refs))
+			// Pop compound type.
+			v.estack.Pop()
+			// Struct with number (2).
+			require.Equal(t, 2, int(v.refs))
+			// Pop struct.
+			v.estack.Pop()
+			require.Equal(t, 0, v.estack.Len())
+			require.Equal(t, 0, int(v.refs))
+		})
+	}
+}
+
+func TestRefCounterPackMapSameKey(t *testing.T) {
+	t.Run("different values", func(t *testing.T) {
+		prog := makeProgram(opcode.PACKMAP)
+		v := load(prog)
+		// Push lightweight item and key.
+		v.estack.PushVal(stackitem.Null{})
+		v.estack.PushVal(stackitem.Make(0))
+		// Push heavyweight item and same key.
+		v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}))
+		v.estack.PushVal(stackitem.Make(0))
+		// Push map length.
+		v.estack.PushVal(stackitem.Make(2))
+		require.Equal(t, 5, v.estack.Len())
+		require.Equal(t, (1+1)+(2+1)+1, int(v.refs))
+		runVM(t, v)
+		// Map with key-value pair: {0: null}.
+		require.Equal(t, 1, v.estack.Len())
+		require.Equal(t, 1+(1+1), int(v.refs))
+		_ = v.estack.Pop()
+		require.Equal(t, 0, v.estack.Len())
+		require.Equal(t, 0, int(v.refs))
+	})
+	t.Run("same values", func(t *testing.T) {
+		prog := makeProgram(opcode.PACKMAP)
+		v := load(prog)
+		arr := stackitem.NewArray([]stackitem.Item{stackitem.Make(42)})
+		// Push array and key.
+		v.estack.PushVal(arr)
+		v.estack.PushVal(stackitem.Make(0))
+		// Push same key-value pair.
+		v.estack.PushVal(arr)
+		v.estack.PushVal(stackitem.Make(0))
+		// Push map length.
+		v.estack.PushVal(stackitem.Make(2))
+		require.Equal(t, 5, v.estack.Len())
+		require.Equal(t, (2+1)+(1+1)+1, int(v.refs))
+		runVM(t, v)
+		// Map with key-value pair: {0: [42]}.
+		require.Equal(t, 1, v.estack.Len())
+		require.Equal(t, 1+(1+2), int(v.refs))
+		_ = v.estack.Pop()
+		require.Equal(t, 0, v.estack.Len())
+		require.Equal(t, 0, int(v.refs))
+	})
+}
+
+func TestRefCounterSetItemException(t *testing.T) {
+	prog := makeProgram(opcode.TRY, 4, 0, opcode.SETITEM)
+	v := load(prog)
+	// Push buffer and invalid key.
+	v.estack.PushVal(stackitem.NewBuffer(nil))
+	v.estack.PushVal(stackitem.Make(0))
+	// Push heavy item.
+	v.estack.PushVal(stackitem.NewArray([]stackitem.Item{stackitem.Make(42)}))
+	require.Equal(t, 3, v.estack.Len())
+	require.Equal(t, 1+1+2, int(v.refs))
+	runVM(t, v)
+	require.Equal(t, vmstate.Halt, v.state)
+	require.Equal(t, 1, v.estack.Len())
+	require.Equal(t, 1, int(v.refs))
+}
+
+func BenchmarkRefCounter_Add(b *testing.B) {
+	a := stackitem.NewArray(nil)
+	rc := newRefCounter()
+
+	for b.Loop() {
+		rc.Add(a)
+	}
+}
+
+func BenchmarkRefCounter_AddRemove(b *testing.B) {
+	a := stackitem.NewArray([]stackitem.Item{})
+	rc := newRefCounter()
+
+	for b.Loop() {
+		rc.Add(a)
+		rc.Remove(a)
+	}
+}
