@@ -29,6 +29,7 @@ func TestUnknownTransactionReturnsNullOnNanvil(t *testing.T) {
 	log := zap.NewNop()
 	opts := nanvilcfg.DefaultStartOptions()
 	opts.Port = 0
+	opts.Explorer = false
 	n, err := node.NewDevNode(opts, log)
 	require.NoError(t, err)
 	require.NoError(t, n.Start(context.Background()))

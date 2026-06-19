@@ -46,8 +46,14 @@ func TestExplorerServesUI(t *testing.T) {
 	if !strings.Contains(string(body), "Nanvil Explorer") {
 		t.Fatalf("missing title: %s", body[:min(200, len(body))])
 	}
-	if !strings.Contains(string(body), "Live Activity") {
-		t.Fatal("missing live activity panel")
+	if !strings.Contains(string(body), `id="activity-drawer"`) {
+		t.Fatal("missing live activity drawer")
+	}
+	if !strings.Contains(string(body), `id="activity-feed"`) {
+		t.Fatal("missing live activity feed")
+	}
+	if !strings.Contains(string(body), `id="live-toggle"`) {
+		t.Fatal("missing live activity toggle")
 	}
 
 	respDocs, err := http.Get("http://" + n.ExplorerAddr + "/docs/getting-started")
