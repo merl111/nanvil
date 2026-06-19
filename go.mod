@@ -1,11 +1,11 @@
 module github.com/nspcc-dev/neo-go
 
-go 1.25
+go 1.25.7
 
 require (
 	github.com/chzyer/readline v1.5.1
-	github.com/consensys/gnark v0.14.0
-	github.com/consensys/gnark-crypto v0.19.2
+	github.com/consensys/gnark v0.12.0
+	github.com/consensys/gnark-crypto v0.17.0
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/google/uuid v1.6.0
@@ -13,11 +13,11 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/uint256 v1.3.2
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+	github.com/nspcc-dev/neo-go/pkg/interop v0.0.0-20260609115526-14bc7067ea2e
 	github.com/mr-tron/base58 v1.2.0
 	github.com/nspcc-dev/bbolt v0.0.0-20260404200350-24f70ceb2bd9
 	github.com/nspcc-dev/dbft v0.4.0
 	github.com/nspcc-dev/go-ordered-json v0.0.0-20260302080601-ff7471f924b3
-	github.com/nspcc-dev/neo-go/pkg/interop v0.0.0-20260609115526-14bc7067ea2e
 	github.com/nspcc-dev/neofs-sdk-go v1.0.0-rc.17
 	github.com/nspcc-dev/rfc6979 v0.2.4
 	github.com/pierrec/lz4 v2.6.1+incompatible
@@ -25,6 +25,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.1-0.20210305035536-64b5b1c73954
 	github.com/twmb/murmur3 v1.1.8
+	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli/v2 v2.27.7
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.48.0
@@ -39,9 +40,10 @@ require (
 	github.com/FactomProject/btcutilecc v0.0.0-20130527213604-d3a63a5752ec // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.24.0 // indirect
+	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/consensys/bavard v0.1.29 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/frankban/quicktest v1.14.5 // indirect
@@ -51,6 +53,7 @@ require (
 	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nspcc-dev/hrw/v2 v2.0.4 // indirect
 	github.com/nspcc-dev/tzhash v1.8.3 // indirect
@@ -60,9 +63,8 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/ronanh/intcomp v1.1.1 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
-	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/tyler-smith/go-bip32 v1.0.0 // indirect
-	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20250705151800-55b8f293f342 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -75,4 +77,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
+	rsc.io/tmplfunc v0.0.3 // indirect
 )
+
+replace github.com/nspcc-dev/neo-go/pkg/interop => ./pkg/interop
