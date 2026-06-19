@@ -2,18 +2,17 @@ package rpc_test
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/nspcc-dev/neo-go/pkg/core/transaction"
+	"github.com/nspcc-dev/neo-go/pkg/nanvil/accounts"
 	nanvilcfg "github.com/nspcc-dev/neo-go/pkg/nanvil/config"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/node"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +20,10 @@ func TestNEP17TransfersVisibleWithNeoLineTimestamp(t *testing.T) {
 	log := zap.NewNop()
 	opts := nanvilcfg.DefaultStartOptions()
 	opts.Port = 0
+	opts.Explorer = false
+	opts.NoMining = true
+	opts.Accounts = 5
+
 	n, err := node.NewDevNode(opts, log)
 	if err != nil {
 		t.Fatal(err)
@@ -29,18 +32,24 @@ func TestNEP17TransfersVisibleWithNeoLineTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer n.Shutdown()
-	time.Sleep(300 * time.Millisecond)
 
-	b64 := "AMLxFuSWP5gAAAAAAKDKEgAAAAAA0wAAAAGoya2kigsN+t2e5qJyqQAmpDkp2AEAWgsCAOH1BQwUXHTYphWH76cEIgA2r+OtW5tRJXUMFKjJraSKCw363Z7monKpACakOSnYFMAfDAh0cmFuc2ZlcgwUz3bii9AGLEpHjuNVYQETGfPPpNJBYn1bUgFCDEDDtz04zNItPLYrDISu+Vox1XmMCEAfXtoV3b3x/g9fvZaqjPJsCdWI0VXPxphDRRC33xILxgdSoidta5dFxIcgKAwhAwg3RX0I5eKijd86gA/K3GjQE/plZTlvw2C2SDzbr1uwQVbnsyc="
-	data, _ := base64.StdEncoding.DecodeString(b64)
-	tx, _ := transaction.NewTransactionFromBytes(data)
+	mgr, err := accounts.NewManager(opts.Mnemonic, opts.Accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := mgr.Accounts[4]
+	tx, err := mgr.SignedGASTransfer(n.Chain, sender, mgr.Accounts[0].Signer.ScriptHash(), 100_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := n.NetServer.RelayTxn(tx); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	if err := n.MineBlock(1); err != nil {
+		t.Fatal(err)
+	}
 
-	since := time.Now().UnixMilli()
-	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"getnep17transfers","params":["NbJSJqVQCAtnGv85YqUNzcezsTgzooEPQD", %d]}`, since)
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"getnep17transfers","params":["%s", 0]}`, sender.Address)
 	resp, err := http.Post("http://"+n.RPCAddr, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +65,5 @@ func TestNEP17TransfersVisibleWithNeoLineTimestamp(t *testing.T) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, raw)
 	}
-	if len(out.Result.Sent)+len(out.Result.Received) == 0 {
-		t.Fatalf("expected transfers, got %s", raw)
-	}
+	require.NotEmpty(t, out.Result.Sent, "expected sent transfers, got %s", raw)
 }

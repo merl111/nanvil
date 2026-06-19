@@ -24,6 +24,19 @@ func TestRegistryAutoMode(t *testing.T) {
 	require.True(t, r.IsImpersonated(util.Uint160{99}))
 }
 
+func TestRegistryListAndEnabled(t *testing.T) {
+	r := impersonate.NewRegistry()
+	require.True(t, r.Enabled())
+	r.SetEnabled(false)
+	require.False(t, r.Enabled())
+
+	h := util.Uint160{1}
+	r.Impersonate(h)
+	list := r.List()
+	require.Len(t, list, 1)
+	require.Equal(t, h, list[0])
+}
+
 func TestGlobalRegistry(t *testing.T) {
 	g := impersonate.Global()
 	g.Reset()

@@ -17,6 +17,7 @@ import (
 func TestDevNodeRPC(t *testing.T) {
 	opts := nanvilcfg.DefaultStartOptions()
 	opts.Port = 18545
+	opts.Explorer = false
 	opts.Accounts = 10
 	opts.BlockTime = 0
 
@@ -54,6 +55,7 @@ func TestDevNodeRPC(t *testing.T) {
 func TestDevNodeMine(t *testing.T) {
 	opts := nanvilcfg.DefaultStartOptions()
 	opts.Port = 18546
+	opts.Explorer = false
 	opts.NoMining = true
 	opts.Accounts = 2
 
