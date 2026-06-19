@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="pkg/nanvil/explorer/static/nanvil-logo.png" alt="Nanvil logo" width="120">
+</p>
+
 # Nanvil
 
 Nanvil is a Neo3 local development node inspired by [Foundry Anvil](https://getfoundry.sh/anvil/). It is built on the [neo-go](https://github.com/nspcc-dev/neo-go) blockchain core, with a dev-node layer for instant local chains, prefunded accounts, mainnet/testnet forking, and Anvil-style RPC cheats.
+
+**Website:** [merl111.github.io/nanvil](https://merl111.github.io/nanvil/) — landing page and documentation (also served in the block explorer at `:8546/docs/`).
 
 ## Features
 
@@ -26,6 +32,7 @@ This starts:
 |---------|-------------|
 | JSON-RPC | `http://127.0.0.1:8545` |
 | Block explorer | `http://127.0.0.1:8546` |
+| Documentation (in explorer) | `http://127.0.0.1:8546/docs/` |
 
 Default mnemonic (10 accounts, 10,000 GAS each):
 
@@ -69,10 +76,12 @@ Prefetch contract storage to avoid first-call latency:
 export NCAST_RPC=http://127.0.0.1:8545
 
 ./bin/ncast balance <address>
-./bin/ncast send --to <address> --value 1
-./bin/ncast call --address <contract> --function balanceOf --args <address>
+./bin/ncast send --wif <wif> <to> 1
+./bin/ncast call gas decimals
 ./bin/ncast deploy --wif <wif> --nef contract.nef --manifest contract.manifest.json
 ```
+
+See [examples cookbook](docs/examples.md) for more workflows.
 
 ## Useful flags
 
@@ -92,9 +101,14 @@ export NCAST_RPC=http://127.0.0.1:8545
 
 ## Documentation
 
+Browse docs in the explorer at `http://127.0.0.1:8546/docs/` while a node is running, or read the markdown files in `docs/`:
+
+- [Overview](docs/index.md)
 - [Getting started](docs/getting-started.md)
+- [Examples cookbook](docs/examples.md)
 - [CLI reference](docs/cli-reference.md)
 - [RPC reference](docs/rpc-reference.md)
+- [Block explorer](docs/explorer.md)
 - [Forking](docs/forking.md)
 - [Impersonation](docs/impersonation.md)
 - [State management](docs/state-management.md)
@@ -103,6 +117,8 @@ export NCAST_RPC=http://127.0.0.1:8545
 - [Anvil comparison](docs/anvil-comparison.md)
 - [Development](docs/development.md)
 - [Upstream sync](docs/upstream-sync.md)
+
+After editing docs, run `make sync-docs` (included in `make build`) to refresh the embedded copy served by the explorer.
 
 ## License
 
