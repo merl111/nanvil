@@ -49,6 +49,8 @@ type StartOptions struct {
 	Explorer               bool
 	ExplorerHost           string
 	ExplorerPort           int
+	LogFormat              string
+	LogLevel               string
 }
 
 // DefaultStartOptions returns Anvil-like defaults.
@@ -62,6 +64,8 @@ func DefaultStartOptions() StartOptions {
 		Accounts:     10,
 		Balance:      10_000_0000_0000,
 		Mnemonic:     "test test test test test test test test test test test junk",
+		LogFormat:    "text",
+		LogLevel:     "info",
 	}
 }
 
@@ -110,6 +114,7 @@ func localBlockchainConfig(opts StartOptions) config.Blockchain {
 			KeepOnlyLatestState: false,
 			SaveInvocations:     true,
 		},
+		MempoolSubscriptionsEnabled: true,
 	}
 	return cfg
 }
@@ -163,9 +168,10 @@ func ApplicationConfig(opts StartOptions) config.ApplicationConfiguration {
 				Enabled:   true,
 				Addresses: []string{opts.Host + ":0"},
 			},
-			MaxGasInvoke:  fixedn.Fixed8FromInt64(15),
-			SessionEnabled:  true,
-			SessionLifetime: 30 * time.Second,
+			MaxGasInvoke:                fixedn.Fixed8FromInt64(15),
+			SessionEnabled:              true,
+			SessionLifetime:             30 * time.Second,
+			MempoolSubscriptionsEnabled: true,
 		},
 		P2P: config.P2P{
 			Addresses:  []string{":0"},

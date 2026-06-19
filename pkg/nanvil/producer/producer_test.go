@@ -34,7 +34,7 @@ func testSetup(t *testing.T) (*core.Blockchain, *producer.BlockBuilder) {
 	t.Cleanup(bc.Close)
 	val, err := accounts.NewValidatorSigner()
 	require.NoError(t, err)
-	return bc, producer.NewBlockBuilder(bc, val)
+	return bc, producer.NewBlockBuilder(bc, val, false)
 }
 
 func TestMineEmptyBlock(t *testing.T) {
@@ -91,7 +91,7 @@ func TestMineIncludesAllPendingMempoolTxs(t *testing.T) {
 
 	mgr, err := accounts.NewManager(opts.Mnemonic, opts.Accounts)
 	require.NoError(t, err)
-	builder := producer.NewBlockBuilder(bc, mgr.Validator)
+	builder := producer.NewBlockBuilder(bc, mgr.Validator, false)
 
 	require.NoError(t, mgr.FundAll(bc, opts.Balance, func(txs ...*transaction.Transaction) error {
 		_, err := builder.Mine(txs...)
@@ -115,6 +115,36 @@ func TestMineIncludesAllPendingMempoolTxs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blk.Transactions, 3)
 	require.Equal(t, 0, bc.GetMemPool().Count())
+}
+
+func TestDropTransactionAndPendingMempool(t *testing.T) {
+	bc, b := testSetup(t)
+	p := producer.NewProducer(b, false, 0, false, 0, zaptest.NewLogger(t))
+
+	mgr, err := accounts.NewManager("test test test test test test test test test test test junk", 2)
+	require.NoError(t, err)
+	require.NoError(t, mgr.FundAll(bc, 10_000_0000_0000, func(txs ...*transaction.Transaction) error {
+		_, err := b.Mine(txs...)
+		return err
+	}))
+	tx, err := mgr.SignedGASTransfer(bc, mgr.Accounts[0], mgr.Accounts[1].Signer.ScriptHash(), 1_0000_0000)
+	require.NoError(t, err)
+	require.NoError(t, bc.GetMemPool().Add(tx, bc))
+	require.Equal(t, 1, p.PendingMempool())
+
+	h := tx.Hash()
+	require.True(t, p.DropTransaction(h))
+	require.False(t, p.DropTransaction(h))
+	require.Equal(t, 0, p.PendingMempool())
+}
+
+func TestMineEmpty(t *testing.T) {
+	bc, b := testSetup(t)
+	h0 := bc.BlockHeight()
+	blks, err := b.MineEmpty(2)
+	require.NoError(t, err)
+	require.Len(t, blks, 2)
+	require.Equal(t, h0+2, bc.BlockHeight())
 }
 
 func TestEmptyBlockInterval(t *testing.T) {

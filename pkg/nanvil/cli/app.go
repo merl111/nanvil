@@ -12,11 +12,11 @@ import (
 	"github.com/nspcc-dev/neo-go/pkg/encoding/address"
 	nanvilcfg "github.com/nspcc-dev/neo-go/pkg/nanvil/config"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/fork"
+	"github.com/nspcc-dev/neo-go/pkg/nanvil/logging"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/node"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/persist"
 	"github.com/nspcc-dev/neo-go/pkg/util"
 	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
 )
 
 // NewApp creates the nanvil CLI application.
@@ -167,6 +167,8 @@ func startFlags() []cli.Flag {
 		&cli.BoolFlag{Name: "no-explorer", Usage: "disable the block explorer UI"},
 		&cli.StringFlag{Name: "explorer-host", Usage: "explorer bind host"},
 		&cli.IntFlag{Name: "explorer-port", Usage: "explorer port", Value: nanvilcfg.DefaultExplorerPort},
+		&cli.StringFlag{Name: "log-format", Usage: "log output format: text (human-readable) or json", Value: "text"},
+		&cli.StringFlag{Name: "log-level", Usage: "log level: debug, info, warn, error", Value: "info"},
 	}
 }
 
@@ -216,8 +218,13 @@ func runStart(c *cli.Context) error {
 		opts.ExplorerHost = opts.Host
 	}
 	opts.ExplorerPort = c.Int("explorer-port")
+	opts.LogFormat = c.String("log-format")
+	opts.LogLevel = c.String("log-level")
 
-	log, _ := zap.NewDevelopment()
+	log, err := logging.New(opts.LogFormat, opts.LogLevel)
+	if err != nil {
+		return err
+	}
 	defer log.Sync() //nolint:errcheck
 
 	dev, err := node.NewDevNode(opts, log)

@@ -34,6 +34,7 @@ ApplicationConfiguration:
       - "127.0.0.1:8545"
     SessionEnabled: true
     SessionLifetime: 30s
+    MempoolSubscriptionsEnabled: true
   Nanvil:
     Enabled: true
     ImpersonationEnabled: true

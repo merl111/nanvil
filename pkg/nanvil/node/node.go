@@ -18,6 +18,7 @@ import (
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/explorer"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/fork"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/impersonate"
+	"github.com/nspcc-dev/neo-go/pkg/nanvil/logging"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/persist"
 	"github.com/nspcc-dev/neo-go/pkg/nanvil/producer"
 	nanvilrpc "github.com/nspcc-dev/neo-go/pkg/nanvil/rpc"
@@ -114,7 +115,7 @@ func NewDevNode(opts nanvilcfg.StartOptions, log *zap.Logger) (*DevNode, error) 
 		return nil, err
 	}
 
-	builder := producer.NewBlockBuilder(bc, accs.Validator, log)
+	builder := producer.NewBlockBuilder(bc, accs.Validator, logging.IsText(opts.LogFormat), log)
 	autoMine := !opts.NoMining
 	prod := producer.NewProducer(builder, autoMine, opts.BlockTime, opts.MineEmptyBlocks, opts.EmptyBlockInterval, log)
 
@@ -200,14 +201,16 @@ func (n *DevNode) Start(ctx context.Context) error {
 			}
 		}
 		n.logFundedAccounts()
-	} else if !skipInit {
+	}
+
+	go n.Chain.Run()
+
+	if n.Fork == nil && !skipInit {
 		if err := n.fundDevAccounts(); err != nil {
 			return fmt.Errorf("fund accounts: %w", err)
 		}
 		n.logFundedAccounts()
 	}
-
-	go n.Chain.Run()
 
 	n.NetServer.Start()
 	n.RPCServer.Start()
@@ -230,17 +233,24 @@ func (n *DevNode) Start(ctx context.Context) error {
 		}
 	}
 
-	fields := []zap.Field{
-		zap.String("rpc", "http://"+n.RPCAddr),
-		zap.Uint32("height", n.Chain.BlockHeight()),
-		zap.String("magic", netmode.Magic(n.Chain.GetConfig().Magic).String()),
-		zap.Int("accounts", len(n.accMgr.Accounts)),
+	if logging.IsText(n.Opts.LogFormat) {
+		fmt.Fprintf(os.Stdout, "\nNanvil listening on http://%s\n", n.RPCAddr)
+		fmt.Fprintf(os.Stdout, "Chain height: %d (%s)\n", n.Chain.BlockHeight(), netmode.Magic(n.Chain.GetConfig().Magic).String())
+		if n.ExplorerAddr != "" {
+			fmt.Fprintf(os.Stdout, "Explorer: http://%s\n", n.ExplorerAddr)
+		}
+	} else {
+		fields := []zap.Field{
+			zap.String("rpc", "http://"+n.RPCAddr),
+			zap.Uint32("height", n.Chain.BlockHeight()),
+			zap.String("magic", netmode.Magic(n.Chain.GetConfig().Magic).String()),
+			zap.Int("accounts", len(n.accMgr.Accounts)),
+		}
+		if n.ExplorerAddr != "" {
+			fields = append(fields, zap.String("explorer", "http://"+n.ExplorerAddr))
+		}
+		n.log.Info("nanvil started", fields...)
 	}
-	if n.ExplorerAddr != "" {
-		fields = append(fields, zap.String("explorer", "http://"+n.ExplorerAddr))
-		fmt.Fprintf(os.Stdout, "\nExplorer: http://%s\n", n.ExplorerAddr)
-	}
-	n.log.Info("nanvil started", fields...)
 	return nil
 }
 
@@ -281,6 +291,9 @@ func (n *DevNode) fundDevAccounts() error {
 
 func (n *DevNode) logFundedAccounts() {
 	n.accMgr.PrintStartupInfo(os.Stdout, n.Opts.Balance, n.Opts.Mnemonic)
+	if logging.IsText(n.Opts.LogFormat) {
+		return
+	}
 	for _, acc := range n.accMgr.Accounts {
 		n.log.Info("dev account funded",
 			zap.Int("index", acc.Index),
@@ -322,11 +335,16 @@ func (n *DevNode) initFork(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	n.log.Info("fork ready",
-		zap.Uint32("branch", manifest.Index),
-		zap.Stringer("root", manifest.RootHash),
-		zap.Int("contracts", len(manifest.Contracts)),
-	)
+	if logging.IsText(n.Opts.LogFormat) {
+		fmt.Fprintf(os.Stderr, "Fork ready at block %d (root %s, %d contracts)\n",
+			manifest.Index, manifest.RootHash.StringLE(), len(manifest.Contracts))
+	} else {
+		n.log.Info("fork ready",
+			zap.Uint32("branch", manifest.Index),
+			zap.Stringer("root", manifest.RootHash),
+			zap.Int("contracts", len(manifest.Contracts)),
+		)
+	}
 	return nil
 }
 
@@ -344,9 +362,6 @@ func (n *DevNode) MineBlock(count int) error {
 		count = 1
 	}
 	for range count {
-		if n.Chain.GetMemPool().Count() == 0 {
-			return nil
-		}
 		if _, err := n.builder.Mine(); err != nil {
 			return err
 		}

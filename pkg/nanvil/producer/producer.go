@@ -2,6 +2,8 @@ package producer
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ type BlockBuilder struct {
 	Chain     *core.Blockchain
 	Validator neotest.Signer
 	log       *zap.Logger
+	textLog   bool
 	mu        sync.Mutex
 	// NextTimestampOffset is added to the next block timestamp (time travel).
 	NextTimestampOffset uint64
@@ -28,12 +31,12 @@ type BlockBuilder struct {
 }
 
 // NewBlockBuilder creates a block builder.
-func NewBlockBuilder(chain *core.Blockchain, validator neotest.Signer, logger ...*zap.Logger) *BlockBuilder {
+func NewBlockBuilder(chain *core.Blockchain, validator neotest.Signer, textLog bool, logger ...*zap.Logger) *BlockBuilder {
 	log := zap.NewNop()
 	if len(logger) != 0 && logger[0] != nil {
 		log = logger[0]
 	}
-	return &BlockBuilder{Chain: chain, Validator: validator, log: log}
+	return &BlockBuilder{Chain: chain, Validator: validator, log: log, textLog: textLog}
 }
 
 // Mine drains the mempool (or uses provided txs) and adds one block.
@@ -61,20 +64,33 @@ func (b *BlockBuilder) mineLocked(txs ...*transaction.Transaction) (*block.Block
 	for _, tx := range blk.Transactions {
 		h := tx.Hash().StringLE()
 		txHashes = append(txHashes, h)
-		b.log.Info("mined transaction",
-			zap.Uint32("block", blk.Index),
-			zap.String("tx", h),
-			zap.Int64("network_fee", tx.NetworkFee),
-			zap.Int64("system_fee", tx.SystemFee),
+		if !b.textLog {
+			b.log.Info("mined transaction",
+				zap.Uint32("block", blk.Index),
+				zap.String("tx", h),
+				zap.Int64("network_fee", tx.NetworkFee),
+				zap.Int64("system_fee", tx.SystemFee),
+			)
+		}
+	}
+	if b.textLog {
+		txWord := "transactions"
+		if len(blk.Transactions) == 1 {
+			txWord = "transaction"
+		}
+		fmt.Fprintf(os.Stderr, "    Block %d mined (%d %s)\n", blk.Index, len(blk.Transactions), txWord)
+		for _, h := range txHashes {
+			fmt.Fprintf(os.Stderr, "      %s\n", h)
+		}
+	} else {
+		b.log.Info("new block mined",
+			zap.Uint32("index", blk.Index),
+			zap.String("hash", blk.Hash().StringLE()),
+			zap.Int("txs", len(blk.Transactions)),
+			zap.Uint64("timestamp", blk.Timestamp),
+			zap.Strings("tx_hashes", txHashes),
 		)
 	}
-	b.log.Info("new block mined",
-		zap.Uint32("index", blk.Index),
-		zap.String("hash", blk.Hash().StringLE()),
-		zap.Int("txs", len(blk.Transactions)),
-		zap.Uint64("timestamp", blk.Timestamp),
-		zap.Strings("tx_hashes", txHashes),
-	)
 	return blk, nil
 }
 
