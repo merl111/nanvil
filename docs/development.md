@@ -8,6 +8,8 @@ Nanvil lives in `cmd/nanvil`, `cmd/ncast`, and `pkg/nanvil/`. The rest of `pkg/`
 make build
 ```
 
+`make build` runs `make sync-docs` first, copying `docs/` into `pkg/nanvil/explorer/embedded-docs/` for the explorer documentation browser.
+
 ## Test
 
 ```bash
