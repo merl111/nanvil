@@ -6,9 +6,10 @@ Nanvil is a Neo3 local development node inspired by [Foundry Anvil](https://getf
 
 | Topic | Description |
 |-------|-------------|
-| [Getting started](getting-started.md) | Install, start a node, first transaction |
+| [Getting started](getting-started.md) | Install from release, start a node, first transaction |
 | [Examples cookbook](examples.md) | End-to-end workflows with copy-paste commands |
-| [CLI reference](cli-reference.md) | `nanvil` and `ncast` flags and commands |
+| [CLI reference](cli-reference.md) | `nanvil`, `ncast`, and `nsmith` flags and commands |
+| [nsmith compiler](nsmith.md) | Multi-language contract compilation (Go, Python, Java, C#) |
 | [RPC reference](rpc-reference.md) | `nanvil_*` JSON-RPC methods |
 | [Block explorer](explorer.md) | Web UI, live updates, docs browser |
 | [Forking](forking.md) | Mainnet / testnet fork workflow |

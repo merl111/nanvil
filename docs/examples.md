@@ -136,14 +136,58 @@ For hot testing, prefer restarting with `--data-dir` persistence instead of in-p
 ## Deploy a contract
 
 ```bash
-# Compile your contract first (neo-go compiler), then:
+# Compile with nsmith (Go example):
+./bin/nsmith compile ./contract.go --name MyContract --out ./build/contract
+
 ./bin/ncast deploy --wif <wif> \
-  --nef contract.nef \
-  --manifest contract.manifest.json
+  --nef ./build/contract.nef \
+  --manifest ./build/contract.manifest.json
 
 # Skip waiting for confirmation
 ./bin/ncast deploy --wif <wif> -i contract.nef -m contract.manifest.json --wait=false
 ```
+
+## Compile example contracts (all languages)
+
+The repository includes minimal contracts for **Go**, **Python**, **C#**, and **Java** under `integration/testcontracts/examples/`. Compile them all with one script:
+
+```bash
+./scripts/test-nsmith-examples.sh
+```
+
+Or compile individually (put flags **before** the path):
+
+```bash
+make build
+./bin/nsmith install --lang python,csharp   # once, for non-Go languages
+
+./bin/nsmith compile --lang go     --out /tmp/nsmith-go     integration/testcontracts/examples/go
+./bin/nsmith compile --lang python --out /tmp/nsmith-py     integration/testcontracts/examples/python
+./bin/nsmith compile --lang csharp --out /tmp/nsmith-csharp integration/testcontracts/examples/csharp
+./bin/nsmith compile --lang java   --out /tmp/nsmith-java   integration/testcontracts/examples/java
+```
+
+Deploy a compiled example against a running node:
+
+```bash
+export NCAST_RPC=http://127.0.0.1:8545
+./bin/ncast deploy --wif <wif> \
+  -i /tmp/nsmith-go.nef \
+  -m /tmp/nsmith-go.manifest.json
+./bin/ncast call <contract-hash> getValue
+```
+
+See [nsmith.md](nsmith.md) for toolchain setup, `nsmith init`, and language-specific notes.
+
+## Explorer contract test
+
+The explorer deploy smoke test uses a Go contract and the same RPC checks as the Contracts tab:
+
+```bash
+./scripts/test-explorer-contracts.sh
+```
+
+Requires `./bin/nanvil start` and builds `nsmith` + `ncast` automatically.
 
 ## Fork mainnet state
 

@@ -27,6 +27,7 @@ var docNav = []struct {
 	{"getting-started", "Getting started"},
 	{"examples", "Examples"},
 	{"cli-reference", "CLI reference"},
+	{"nsmith", "nsmith compiler"},
 	{"rpc-reference", "RPC reference"},
 	{"explorer", "Block explorer"},
 	{"forking", "Forking"},

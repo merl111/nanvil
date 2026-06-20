@@ -278,3 +278,30 @@ ncast watch [--lines N]
 
 See [examples.md](examples.md) for full workflows.
 
+---
+
+## nsmith
+
+Multi-language Neo contract compiler. See [nsmith.md](nsmith.md) for full documentation.
+
+```bash
+nsmith compile [path] [--lang go|python|java|csharp] [--out prefix] [--name Name] [--config contract.yml]
+nsmith build [path] [--deploy --wif <wif>]
+nsmith init <name> --lang go|python|java|csharp
+nsmith install|update [--lang ...] [--all]
+nsmith toolchain list
+nsmith doctor [--all]
+nsmith version
+```
+
+Put flags **before** the path: `nsmith compile --lang python ./contract.py`.
+
+```bash
+./bin/nsmith compile ./contract.go --name MyContract --out ./build/contract
+./bin/ncast deploy --wif <wif> -i ./build/contract.nef -m ./build/contract.manifest.json
+
+# Compile all repo language examples
+./scripts/test-nsmith-examples.sh
+```
+
+Example sources: `integration/testcontracts/examples/{go,python,csharp,java}/`.
