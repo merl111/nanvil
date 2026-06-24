@@ -2,32 +2,42 @@ package cli
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nspcc-dev/neo-go/pkg/core/block"
 	"github.com/nspcc-dev/neo-go/pkg/core/mempoolevent"
+	"github.com/nspcc-dev/neo-go/pkg/core/state"
 	"github.com/nspcc-dev/neo-go/pkg/core/transaction"
 	"github.com/nspcc-dev/neo-go/pkg/encoding/address"
 	"github.com/nspcc-dev/neo-go/pkg/ncast"
 	"github.com/nspcc-dev/neo-go/pkg/neorpc/result"
 	"github.com/nspcc-dev/neo-go/pkg/rpcclient"
+	"github.com/nspcc-dev/neo-go/pkg/util"
+	"github.com/nspcc-dev/neo-go/pkg/vm/stackitem"
 	"github.com/urfave/cli/v2"
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorDim    = "\033[2m"
-	colorGreen  = "\033[32m"
-	colorCyan   = "\033[36m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorBold   = "\033[1m"
+	colorReset   = "\033[0m"
+	colorDim     = "\033[2m"
+	colorGreen   = "\033[32m"
+	colorCyan    = "\033[36m"
+	colorYellow  = "\033[33m"
+	colorBlue    = "\033[34m"
+	colorMagenta = "\033[35m"
+	colorRed     = "\033[31m"
+	colorBold    = "\033[1m"
 )
 
 func watchCmd() *cli.Command {
@@ -37,8 +47,14 @@ func watchCmd() *cli.Command {
 		Usage:   "Live chain status — blocks, transactions, mempool in real time",
 		Flags: []cli.Flag{
 			&cli.IntFlag{Name: "lines", Aliases: []string{"n"}, Value: 20, Usage: "Number of recent events to show"},
+			&cli.StringFlag{Name: "contract", Aliases: []string{"c"}, Usage: "Filter notifications by contract (native name, N-address, or script hash)"},
+			&cli.StringFlag{Name: "event", Aliases: []string{"e"}, Usage: "Filter notifications by event name (e.g. Transfer)"},
+			&cli.DurationFlag{Name: "poll", Aliases: []string{"p"}, Value: 2 * time.Second, Usage: "Polling interval in event mode (e.g. 500ms, 2s)"},
 		},
 		Action: func(ctx *cli.Context) error {
+			if ctx.String("contract") != "" || ctx.String("event") != "" {
+				return runWatchEvents(ctx)
+			}
 			return runWatch(ctx)
 		},
 	}
@@ -227,4 +243,213 @@ func enterAltScreen() {
 
 func leaveAltScreen() {
 	fmt.Print("\033[?1049l\033[?25h")
+}
+
+
+func runWatchEvents(ctx *cli.Context) error {
+	endpoint := rpcEndpoint(ctx)
+	poll := ctx.Duration("poll")
+	if poll <= 0 {
+		return fmt.Errorf("--poll must be positive")
+	}
+	eventFilter := strings.ToLower(strings.TrimSpace(ctx.String("event")))
+	jsonMode := jsonOut(ctx)
+
+	cctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		cancel()
+	}()
+
+	c, err := ncast.RPCClient(cctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var (
+		contractFilter    util.Uint160
+		hasContractFilter bool
+	)
+	if s := strings.TrimSpace(ctx.String("contract")); s != "" {
+		u, err := ncast.ResolveContract(c, s)
+		if err != nil {
+			return fmt.Errorf("contract: %w", err)
+		}
+		contractFilter = u
+		hasContractFilter = true
+	}
+
+	count, err := c.GetBlockCount()
+	if err != nil {
+		return fmt.Errorf("getblockcount: %w", err)
+	}
+	var lastBlock uint32
+	if count > 0 {
+		lastBlock = count - 1
+	}
+
+	if !jsonMode {
+		printEventsHeader(endpoint, hasContractFilter, contractFilter, eventFilter, poll, lastBlock+1)
+	}
+
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-cctx.Done():
+			return nil
+		case <-ticker.C:
+			current, err := c.GetBlockCount()
+			if err != nil {
+				if !jsonMode {
+					fmt.Fprintf(os.Stderr, "%spoll error: %s%s\n", colorRed, err, colorReset)
+				}
+				continue
+			}
+			if current == 0 {
+				continue
+			}
+			for i := lastBlock + 1; i <= current-1; i++ {
+				processEventBlock(c, i, hasContractFilter, contractFilter, eventFilter, jsonMode)
+				lastBlock = i
+			}
+		}
+	}
+}
+
+func processEventBlock(c *rpcclient.Client, idx uint32, hasContractFilter bool, contractFilter util.Uint160, eventFilter string, jsonMode bool) {
+	hash, err := c.GetBlockHash(idx)
+	if err != nil {
+		if !jsonMode {
+			fmt.Fprintf(os.Stderr, "%sblock %d: %s%s\n", colorRed, idx, err, colorReset)
+		}
+		return
+	}
+	blk, err := c.GetBlockByHash(hash)
+	if err != nil {
+		if !jsonMode {
+			fmt.Fprintf(os.Stderr, "%sblock %d: %s%s\n", colorRed, idx, err, colorReset)
+		}
+		return
+	}
+	for _, tx := range blk.Transactions {
+		appLog, err := c.GetApplicationLog(tx.Hash(), nil)
+		if err != nil {
+			continue
+		}
+		for _, exec := range appLog.Executions {
+			for _, ne := range exec.Events {
+				if hasContractFilter && ne.ScriptHash != contractFilter {
+					continue
+				}
+				if eventFilter != "" && strings.ToLower(ne.Name) != eventFilter {
+					continue
+				}
+				if jsonMode {
+					printEventJSON(idx, tx.Hash(), ne)
+				} else {
+					printEventHuman(idx, tx.Hash(), ne)
+				}
+			}
+		}
+	}
+}
+
+func printEventsHeader(endpoint string, hasContract bool, contract util.Uint160, eventFilter string, poll time.Duration, startBlock uint32) {
+	fmt.Println()
+	fmt.Printf("%s%s ncast watch%s\n", colorBold, colorGreen, colorReset)
+	fmt.Printf("%s  RPC      : %s%s\n", colorDim, endpoint, colorReset)
+	cf := "all contracts"
+	if hasContract {
+		cf = "0x" + contract.StringLE()
+	}
+	fmt.Printf("%s  Contract : %s%s\n", colorDim, cf, colorReset)
+	ef := "all events"
+	if eventFilter != "" {
+		ef = eventFilter
+	}
+	fmt.Printf("%s  Event    : %s%s\n", colorDim, ef, colorReset)
+	fmt.Printf("%s  Poll     : %s%s\n", colorDim, poll, colorReset)
+	fmt.Printf("%s  Starting at block %d. Press Ctrl+C to stop.%s\n\n", colorDim, startBlock, colorReset)
+}
+
+func printEventHuman(blockIdx uint32, txHash util.Uint256, ne state.NotificationEvent) {
+	fmt.Printf("\n%s── Block %d ──────────────────────────────%s\n", colorCyan, blockIdx, colorReset)
+	fmt.Printf("  TX       %s%s%s\n", colorDim, txHash.StringLE(), colorReset)
+	fmt.Printf("  Contract %s0x%s%s\n", colorYellow, ne.ScriptHash.StringLE(), colorReset)
+	fmt.Printf("  Event    %s%s%s\n", colorGreen, ne.Name, colorReset)
+	var items []stackitem.Item
+	if ne.Item != nil {
+		if v, ok := ne.Item.Value().([]stackitem.Item); ok {
+			items = v
+		}
+	}
+	if len(items) > 0 {
+		fmt.Println("  Args")
+		for i, it := range items {
+			t := "Any"
+			if it != nil {
+				t = it.Type().String()
+			}
+			fmt.Printf("    %s[%d]%s %s%s%s = %s\n",
+				colorDim, i, colorReset,
+				colorMagenta, t, colorReset,
+				formatStackItem(it))
+		}
+	}
+}
+
+func printEventJSON(blockIdx uint32, txHash util.Uint256, ne state.NotificationEvent) {
+	out := struct {
+		Block  uint32       `json:"block"`
+		TxHash util.Uint256 `json:"txhash"`
+		state.NotificationEvent
+	}{
+		Block:             blockIdx,
+		TxHash:            txHash,
+		NotificationEvent: ne,
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return
+	}
+	fmt.Println(string(data))
+}
+
+func formatStackItem(it stackitem.Item) string {
+	if it == nil {
+		return "null"
+	}
+	switch v := it.Value().(type) {
+	case nil:
+		return "null"
+	case bool:
+		return strconv.FormatBool(v)
+	case *big.Int:
+		return v.String()
+	case []byte:
+		if utf8.Valid(v) && isPrintableBytes(v) {
+			return strconv.Quote(string(v))
+		}
+		return "0x" + hex.EncodeToString(v)
+	case []stackitem.Item:
+		return fmt.Sprintf("[%d items]", len(v))
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func isPrintableBytes(b []byte) bool {
+	for _, c := range b {
+		if c < 0x20 && c != '\n' && c != '\t' && c != '\r' {
+			return false
+		}
+	}
+	return true
 }
